@@ -1,0 +1,515 @@
+# Gauge
+# Spotpear desktop trinket is an ESP32C3 
+# with an attached 1.44inch 128x128 TFT color LCD screen, driven by ST7735S with a white LED backlight
+# The display - dc_pin: GPIO0, cs_pin: GPIO02, reset_pin: GPIO05 
+# Display is driven by a ST7735 SPI chip - clk_pin: GPIO03, mosi_pin: GPIO04, the miso_pin is nc
+# The display backlight cannot be controlled: use it.fill(COLOR_OFF)
+# There are 4 physical buttons: Boot (GPIO9) (ESP32C3 pin 15) and reset (ESP32C3 pin 7: Reset), key1 (ESP32C3 GPIO8) and key2 (ESP32C3 GPIO10)
+# Boot pin is usable after boot is completed.  Key1 and Key2 are user programmable.
+# GPIO11 is connected to a red LED
+#
+# To reprogram the device, it is best to connect to the USB port on the computer running ESPHome Dashboard,
+# and use the "Plug into the computer running ESPHome Device Builder" install option to flash over the JTAG port
+#
+substitutions:
+  nodename: "gauge"
+  nodeip: "192.168.0.126"
+  gatewayip: "192.168.0.1"
+  indoor_temp_sensor: "sensor.zigbee_5_xiaomi_6062_temperature"
+  outdoor_temp_sensor: "sensor.kingston_weather_temperature"
+
+esphome:
+  name: ${nodename}
+  friendly_name: ${nodename}
+  includes:
+    - wifi_icon.h
+
+esp32:
+  board: esp32-c3-devkitm-1
+  variant: ESP32C3
+  framework:
+    type: esp-idf    
+
+# Enable logging
+logger:
+  level: INFO
+
+debug:
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: "your-key-here"
+  on_client_connected:
+    - logger.log: "API client connected!"
+    - binary_sensor.template.publish:
+        id: toggling_display
+        state: True
+
+# # local LAN web server
+web_server:
+  version: 2
+  js_include: "./v2/www.js"
+  local: true
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  reboot_timeout: 0s
+
+  # Optional manual IP
+  manual_ip:
+    static_ip: ${nodeip}
+    gateway: ${gatewayip}
+    subnet: 255.255.255.0
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "Gauge Fallback Hotspot"
+    password: "somepassword"
+
+captive_portal:
+
+button:
+  # buttons for shutdown and reboot
+  - platform: shutdown
+    name: shutdown
+
+  - platform: restart
+    name: "reboot"
+
+  - platform: template
+    name: Toggling Button
+    id: toggling_button
+    on_press:
+      then:
+        - logger.log:
+            format: "Toggling Button pressed"
+            level: INFO
+        - if:
+            condition:
+              binary_sensor.is_on: toggling_display
+            then:
+              - binary_sensor.template.publish:
+                  id: toggling_display
+                  state: False
+            else:
+              - binary_sensor.template.publish:
+                  id: toggling_display
+                  state: True
+
+  # the logical inside button (shows on the web page)
+  - platform: template
+    name: Inside Button
+    id: inside_button
+    on_press:
+      then:
+        - logger.log: 
+            format: "Inside Button pressed"
+            level: INFO
+        - lvgl.indicator.update:
+            id: temperature_needle
+            value: !lambda return id(inside_temp).state;
+        - lvgl.label.update:
+            id: temperature_text
+            text:
+              format: "%.1f°"
+              args: [ 'id(inside_temp).state' ]
+        - lvgl.label.update:
+            id: temperature_text_label
+            text: "Inside"
+        - lvgl.page.show: meter_page
+
+  # the logical outside button (shows on the web page)
+  - platform: template
+    name: Outside Button
+    id: outside_button
+    on_press:
+      then:
+        - logger.log: 
+            format: "Outside Button pressed"
+            level: INFO
+        - lvgl.indicator.update:
+            id: temperature_needle
+            value: !lambda return id(outside_temp).state;
+        - lvgl.label.update:
+            id: temperature_text
+            text:
+              format: "%.1f°"
+              args: [ 'id(outside_temp).state' ]
+        - lvgl.label.update:
+            id: temperature_text_label
+            text: "Outside"
+        - lvgl.page.show: meter_page
+
+  # the logical boot button (shows on the web page)
+  - platform: template
+    name: Boot Button
+    id: boot_button
+    on_press:
+      then:
+        - logger.log: 
+            format: "Boot Button pressed"
+            level: INFO
+        - binary_sensor.template.publish:
+            id: toggling_display
+            state: False
+        - lvgl.page.show: black_page
+
+light:
+  # Status LED shares the red led between status and an addressable light
+  # flashes when there is a warning or error on startup
+  - platform: status_led
+    name: Red LED
+    id: red_led
+    pin: GPIO11
+    on_turn_on:
+      - logger.log:
+          format: "Red LED ON"
+          level: INFO
+    on_turn_off:
+      - logger.log:
+          format: "Red LED OFF"
+          level: INFO
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: IP Address
+
+  - platform: uptime
+    name: Uptime
+    id: my_uptime
+    update_interval: 1 min
+    internal: True
+
+binary_sensor:
+  # status for HA
+  - platform: status
+    name: Status
+    
+  # sensor to alternate between inside/outside display
+  - platform: template
+    id: inside_outside
+    internal: True
+
+  # sensor to activate toggling display
+  - platform: template
+    id: toggling_display
+    internal: True
+
+  # key 1: Inside
+  - platform: gpio
+    pin:
+      number: GPIO8
+      mode:
+        input: true
+        pullup: true
+      inverted: true
+    id: key1
+    internal: True
+    filters:
+      - delayed_on_off: 50ms
+    on_state:
+      - logger.log:
+          format: "Key1 pressed"
+          level: INFO
+      - button.press: inside_button
+
+  # key 2: Outside
+  - platform: gpio
+    pin:
+      number: GPIO10
+      mode:
+        input: true
+        pullup: true
+      inverted: true
+    id: key2
+    internal: True
+    filters:
+      - delayed_on_off: 50ms
+    on_state:
+      - logger.log:
+          format: "Key2 pressed"
+          level: INFO
+      - button.press: outside_button
+
+  # key 3 (Boot): turn off display
+  - platform: gpio
+    pin:
+      number: GPIO9
+      mode:
+        input: true
+        pullup: true
+      inverted: true
+    id: key3
+    internal: True
+    filters:
+      - delayed_on_off: 50ms
+    on_state:
+      - logger.log:
+          format: "Boot key pressed"
+          level: INFO
+      - button.press: boot_button
+
+sensor:
+  - platform: wifi_signal
+    name: WiFi RSSI
+    id: wifi_rssi
+    update_interval: 60s
+    internal: True
+
+  - platform: copy # Reports the WiFi signal strength in %
+    source_id: wifi_rssi
+    name: "WiFi Signal Percent"
+    id: wifi_signal_pct
+    filters:
+      - lambda: return min(max(2 * (x + 100.0), 0.0), 100.0);
+    unit_of_measurement: "%"
+    entity_category: "diagnostic"
+    device_class: power factor
+    internal: True
+
+  - platform: homeassistant
+    entity_id: ${outdoor_temp_sensor}
+    name: "Outside Temp"
+    id: outside_temp
+    on_value:
+      then:
+        - button.press: outside_button
+
+  - platform: homeassistant
+    entity_id: ${indoor_temp_sensor}
+    name: "Inside Temp"
+    id: inside_temp
+    on_value:
+      then:
+        - button.press: inside_button
+
+spi:
+  id: myspi0
+  interface: SPI
+  clk_pin: GPIO03
+  mosi_pin: GPIO04
+  # miso_pin: GPIOXX
+
+color:
+  - id: my_red
+    hex: 'FF0000'
+  - id: my_green
+    red: 10%
+    green: 100%
+    blue: 0%
+  - id: my_light_green
+    red: 50%
+    green: 100%
+    blue: 50%
+  - id: my_blue
+    hex: '0000FF'
+  - id: my_light_blue
+    red: 68%
+    green: 85%
+    blue: 90%
+  - id: my_yellow
+    red: 100%
+    green: 90%
+    blue: 0%
+  - id: my_white
+    hex: 'FFFFFF'
+  - id: my_grey
+    hex: '5A5A5A'
+  - id: my_black
+    hex: '000000'
+
+font:
+  # some fonts for the display
+  - file: 
+      type: gfonts
+      family: Roboto
+      weight: bold
+    id: font1
+    size: 16
+
+  - file:
+      type: gfonts
+      family: Roboto
+      weight: bold
+    id: font2
+    size: 22
+
+  - file:
+      type: gfonts
+      family: Roboto
+      weight: bold
+    id: font3
+    size: 32
+
+  - file: 'fonts/materialdesignicons-webfont.ttf'
+    id: icons
+    size: 26
+    glyphs: [
+        "󰤮", # no-wifi
+        "󰤯", # low-wifi
+        "󰤟", # wifi-1
+        "󰤢", # wifi-2
+        "󰤥", # wifi-3
+        "󰤨", # wifi-4
+        "󰜸", # arrow-up-bold-box
+        "󰜯", # arrow-down-bold-box
+        "󰎤", # numeric-1-box
+        "󰎧", # numeric-2-box
+        "󰬙", # alpha-R-box
+        "󰬉", # alpah-B-box
+     ]
+
+lvgl:
+  displays:
+    - display_1
+  pages:
+    - id: meter_page
+      # bg_opa: 0
+      bg_color: my_black
+      scrollbar_mode: "OFF"
+      widgets:
+        - meter:
+            align: center
+            height: 150
+            width: 150
+            # bg_opa: 0
+            bg_color: my_black
+            border_width: 0
+            scales:
+              range_from: -10
+              range_to: 50
+              angle_range: 180
+              rotation: 180
+              ticks:
+                count: 0
+                length: 0
+              indicators:
+                - line:
+                    id: temperature_needle
+                    width: 3
+                    color: my_white
+                    r_mod: -3
+                - arc:
+                    start_value: -10
+                    end_value: 10
+                    color: my_blue
+                    width: 30
+                - arc:
+                    start_value: 10
+                    end_value: 25
+                    color: my_green
+                    width: 30
+                - arc:
+                    start_value: 25
+                    end_value: 30
+                    color: my_yellow
+                    width: 30
+                - arc:
+                    start_value: 30
+                    end_value: 50
+                    color: my_red
+                    width: 30
+        - label:
+            id: temperature_text
+            text: "-.-°"
+            align: CENTER
+            y: 20
+            text_font: font3
+            text_color: my_white
+        - label:
+            id: temperature_text_label
+            text: "Outside"
+            align: CENTER
+            y: 45
+            text_font: font2
+            text_color: my_white
+        - label:
+            id: numeric_2
+            y: 0
+            text: "2"
+            text_font: font1
+            text_color: my_white
+        - label:
+            id: numeric_1
+            y: 105
+            text: "1"
+            text_font: font1
+            text_color: my_white
+        - label:
+            id: boot_box
+            x: 115
+            text: "B"
+            text_font: font1
+            text_color: my_white
+        - label:
+            id: reset_box
+            x: 115
+            y: 105
+            text: "R"
+            text_font: font1
+            text_color: my_white
+    - id: black_page
+      bg_color: my_black
+      height: 128
+      width: 128
+      widgets:
+        - label:
+            align: CENTER
+            text: 'Goodnight!'
+            
+display:
+  - platform: ili9xxx
+    id: display_1
+    model: ST7735
+    dc_pin: GPIO0
+    cs_pin: GPIO02
+    reset_pin: GPIO05
+    invert_colors: false
+    color_order: bgr
+    show_test_card: false
+    auto_clear_enabled: false
+    dimensions: 128x128
+
+interval:
+  - interval: 10sec
+    then:
+      - if:
+          condition:
+            binary_sensor.is_on: toggling_display
+          then:
+            - if:
+                condition:
+                  binary_sensor.is_on: inside_outside
+                then:
+                  - button.press: outside_button
+                  - binary_sensor.template.publish:
+                      id: inside_outside
+                      state: False
+                else:
+                  - button.press: inside_button
+                  - binary_sensor.template.publish:
+                      id: inside_outside
+                      state: True
+
+time:
+  - platform: homeassistant
+    on_time:
+
+      # Every morning
+      - seconds: 0
+        minutes: 0
+        hours: 7
+        then:
+          - button.press: inside_button
+          - button.press: toggling_button
+
+
+      # Every evening
+      - seconds: 0
+        minutes: 30
+        hours: 21
+        then:
+          - button.press: boot_button
