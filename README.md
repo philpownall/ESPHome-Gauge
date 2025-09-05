@@ -2,7 +2,7 @@
 A Gauge using an ESP32-C3 with attached color display
 
 ### Ingredients
-- The Spotpear desktop trinket uses an ESP32C3
+- The Spotpear desktop trinket from [Spotpear](https://spotpear.com/shop/ESP32-C3-desktop-trinket-Mini-TV-Portable-Pendant-LVGL-1.44inch-LCD-ST7735.html)
 
 The attached 1.44inch 128x128 TFT color LCD screen is driven by an ST7735S with a white LED backlight
 
