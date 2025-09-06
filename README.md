@@ -20,3 +20,7 @@ ESP32C3 pin GPIO11 is connected to a controllable red LED
 
 The desktop trinket has a small battery power connector on the bottom side, but it is not very useful as the device has no power button,
 and the display backlight cannot be turned off.
+
+## Bonus - A Linux Desktop Widget
+
+By using the host: platform in ESPHome, you can create a desktop widget of this gauge for use on a PC (e.g. Linux) - see the host platform documentation at [ESPHome Host](https://esphome.io/components/host/) - this is how I created the Gauge image above using the Linux Screenshot tool.  This is very useful for playing around with the LVGL widget and label positions without having to re-flash the ESP32 multiple times.

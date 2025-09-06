@@ -1,0 +1,262 @@
+substitutions:
+  nodename: "gauge1"
+  indoor_temp_sensor: "your_HA_inside_temp_sensor"
+  outdoor_temp_sensor: "your_HA_outside_temp_sensor"
+
+esphome:
+  name: hostdevice
+  friendly_name: hostdevice
+
+host:
+  mac_address: "06:35:69:ab:f6:79" # random virtual MAC address
+  
+# Enable logging
+logger:
+
+# Enable Home Assistant API
+api:
+
+button:
+  # the logical inside button (shows on the web page)
+  - platform: template
+    name: Inside Button
+    id: inside_button
+    on_press:
+      then:
+        - logger.log: 
+            format: "Inside Button pressed"
+            level: INFO
+        - lvgl.indicator.update:
+            id: temperature_needle
+            value: !lambda return id(inside_temp).state;
+        - lvgl.label.update:
+            id: temperature_text
+            text:
+              format: "%.1f°"
+              args: [ 'id(inside_temp).state' ]
+        - lvgl.label.update:
+            id: temperature_text_label
+            text: "Inside"
+
+  # the logical outside button (shows on the web page)
+  - platform: template
+    name: Outside Button
+    id: outside_button
+    on_press:
+      then:
+        - logger.log: 
+            format: "Outside Button pressed"
+            level: INFO
+        - lvgl.indicator.update:
+            id: temperature_needle
+            value: !lambda return id(outside_temp).state;
+        - lvgl.label.update:
+            id: temperature_text
+            text:
+              format: "%.1f°"
+              args: [ 'id(outside_temp).state' ]
+        - lvgl.label.update:
+            id: temperature_text_label
+            text: "Outside"
+
+  # the logical boot button (shows on the web page)
+  - platform: template
+    name: Boot Button
+    id: boot_button
+    on_press:
+      then:
+        - logger.log: 
+            format: "Boot Button pressed"
+            level: INFO
+        - switch.turn_off: display_onoff
+
+switch:
+  - platform: template
+    name: Display On Off
+    optimistic: True
+    id: display_onoff
+    turn_on_action:
+      then:
+        - lvgl.page.show: meter_page
+    turn_off_action:
+      then:
+        - lvgl.page.show: black_page
+
+binary_sensor:
+  # status for HA
+  - platform: status
+    name: Status
+    
+  # sensor to alternate between inside/outside display
+  - platform: template
+    id: inside_outside
+    internal: True
+
+sensor:
+  - platform: homeassistant
+    entity_id: ${indoor_temp_sensor}
+    name: "Inside Temp"
+    id: inside_temp
+    on_value:
+      then:
+        - button.press: inside_button
+
+  - platform: homeassistant
+    entity_id: ${outdoor_temp_sensor}
+    name: "Outside Temp"
+    id: outside_temp
+    on_value:
+      then:
+        - button.press: outside_button
+
+font:
+  # some fonts for the display
+  - file: 
+      type: gfonts
+      family: Roboto
+      weight: bold
+    id: font1
+    size: 16
+
+  - file:
+      type: gfonts
+      family: Roboto
+      weight: bold
+    id: font2
+    size: 22
+
+  - file:
+      type: gfonts
+      family: Roboto
+      weight: bold
+    id: font3
+    size: 32
+
+color:
+  - id: my_red
+    hex: 'FF0000'
+  - id: my_green
+    red: 10%
+    green: 100%
+    blue: 0%
+  - id: my_light_green
+    red: 50%
+    green: 100%
+    blue: 50%
+  - id: my_blue
+    hex: '0000FF'
+  - id: my_light_blue
+    red: 68%
+    green: 85%
+    blue: 90%
+  - id: my_yellow
+    red: 100%
+    green: 90%
+    blue: 0%
+  - id: my_white
+    hex: 'FFFFFF'
+  - id: my_grey
+    hex: '5A5A5A'
+  - id: my_black
+    hex: '000000'
+
+display:
+  - platform: sdl
+    id: sdl_display
+    update_interval: 1s
+    auto_clear_enabled: false
+    show_test_card: false
+    dimensions:
+      width: 128
+      height: 128
+
+lvgl:
+  displays:
+    - sdl_display
+  pages:
+    - id: meter_page
+      # bg_opa: 0
+      bg_color: my_black
+      scrollbar_mode: "OFF"
+      widgets:
+        - meter:
+            align: center
+            height: 150
+            width: 150
+            # bg_opa: 0
+            bg_color: my_black
+            border_width: 0
+            scales:
+              range_from: -10
+              range_to: 50
+              angle_range: 180
+              rotation: 180
+              ticks:
+                count: 0
+                length: 0
+              indicators:
+                - line:
+                    id: temperature_needle
+                    width: 3
+                    color: my_white
+                    r_mod: -3
+                - arc:
+                    start_value: -10
+                    end_value: 10
+                    color: my_blue
+                    width: 30
+                - arc:
+                    start_value: 10
+                    end_value: 25
+                    color: my_green
+                    width: 30
+                - arc:
+                    start_value: 25
+                    end_value: 30
+                    color: my_yellow
+                    width: 30
+                - arc:
+                    start_value: 30
+                    end_value: 50
+                    color: my_red
+                    width: 30
+        - label:
+            id: temperature_text
+            text: "-.-°"
+            align: CENTER
+            y: 20
+            text_font: font3
+            text_color: my_white
+        - label:
+            id: temperature_text_label
+            text: "Outside"
+            align: CENTER
+            y: 45
+            text_font: font2
+            text_color: my_white
+    - id: black_page
+      bg_color: my_black
+      height: 128
+      width: 128
+      widgets:
+        - label:
+            align: CENTER
+            text: 'Goodnight!'
+
+interval:
+  - interval: 10sec
+    then:
+      - if:
+          condition:
+            binary_sensor.is_on: inside_outside
+          then:
+            - button.press: outside_button
+            - binary_sensor.template.publish:
+                id: inside_outside
+                state: False
+          else:
+            - button.press: inside_button
+            - binary_sensor.template.publish:
+                id: inside_outside
+                state: True
+
