@@ -1,6 +1,7 @@
 # Gauge
 # Spotpear desktop trinket is an ESP32C3 
 # with an attached 1.44inch 128x128 TFT color LCD screen, driven by ST7735S with a white LED backlight
+# See the board schematic in /home/phil/esphome/ESP32-C3-1.44inch.pdf
 # The display - dc_pin: GPIO0, cs_pin: GPIO02, reset_pin: GPIO05 
 # Display is driven by a ST7735 SPI chip - clk_pin: GPIO03, mosi_pin: GPIO04, the miso_pin is nc
 # The display backlight cannot be controlled: use it.fill(COLOR_OFF)
@@ -10,6 +11,7 @@
 #
 # To reprogram the device, it is best to connect to the USB port on the computer running ESPHome Dashboard,
 # and use the "Plug into the computer running ESPHome Device Builder" install option to flash over the JTAG port
+# I am now using the arduino framework; using the esphome framework yields compile errors
 #
 substitutions:
   nodename: "gauge"
@@ -39,12 +41,10 @@ debug:
 # Enable Home Assistant API
 api:
   encryption:
-    key: "your-key-here"
+    key: "your_key_here"
   on_client_connected:
     - logger.log: "API client connected!"
-    - binary_sensor.template.publish:
-        id: toggling_display
-        state: True
+    - switch.turn_on: display_onoff
 
 # # local LAN web server
 web_server:
@@ -66,7 +66,7 @@ wifi:
   # Enable fallback hotspot (captive portal) in case wifi connection fails
   ap:
     ssid: "Gauge Fallback Hotspot"
-    password: "somepassword"
+    password: "VwgLjPfXWYSR"
 
 captive_portal:
 
@@ -77,26 +77,6 @@ button:
 
   - platform: restart
     name: "reboot"
-
-  - platform: template
-    name: Toggling Button
-    id: toggling_button
-    on_press:
-      then:
-        - logger.log:
-            format: "Toggling Button pressed"
-            level: INFO
-        - if:
-            condition:
-              binary_sensor.is_on: toggling_display
-            then:
-              - binary_sensor.template.publish:
-                  id: toggling_display
-                  state: False
-            else:
-              - binary_sensor.template.publish:
-                  id: toggling_display
-                  state: True
 
   # the logical inside button (shows on the web page)
   - platform: template
@@ -118,7 +98,6 @@ button:
         - lvgl.label.update:
             id: temperature_text_label
             text: "Inside"
-        - lvgl.page.show: meter_page
 
   # the logical outside button (shows on the web page)
   - platform: template
@@ -140,7 +119,6 @@ button:
         - lvgl.label.update:
             id: temperature_text_label
             text: "Outside"
-        - lvgl.page.show: meter_page
 
   # the logical boot button (shows on the web page)
   - platform: template
@@ -151,10 +129,85 @@ button:
         - logger.log: 
             format: "Boot Button pressed"
             level: INFO
-        - binary_sensor.template.publish:
-            id: toggling_display
-            state: False
+        - switch.turn_off: display_onoff
+
+switch:
+  - platform: template
+    name: Display On Off
+    optimistic: True
+    id: display_onoff
+    turn_on_action:
+      then:
+        - lvgl.page.show: meter_page
+    turn_off_action:
+      then:
         - lvgl.page.show: black_page
+
+binary_sensor:
+  # status for HA
+  - platform: status
+    name: Status
+    
+  # sensor to alternate between inside/outside display
+  - platform: template
+    id: inside_outside
+    internal: True
+
+  # key 1: Inside
+  - platform: gpio
+    pin:
+      number: GPIO8
+      mode:
+        input: true
+        pullup: true
+      inverted: true
+    id: key1
+    internal: True
+    filters:
+      - delayed_on_off: 50ms
+    on_state:
+      - logger.log:
+          format: "Key1 pressed"
+          level: INFO
+      - switch.turn_on: display_onoff
+      - button.press: inside_button
+
+  # key 2: Outside
+  - platform: gpio
+    pin:
+      number: GPIO10
+      mode:
+        input: true
+        pullup: true
+      inverted: true
+    id: key2
+    internal: True
+    filters:
+      - delayed_on_off: 50ms
+    on_state:
+      - logger.log:
+          format: "Key2 pressed"
+          level: INFO
+      - button.press: outside_button
+      - switch.turn_on: display_onoff
+
+  # key 3 (Boot): turn off display
+  - platform: gpio
+    pin:
+      number: GPIO9
+      mode:
+        input: true
+        pullup: true
+      inverted: true
+    id: key3
+    internal: True
+    filters:
+      - delayed_on_off: 50ms
+    on_state:
+      - logger.log:
+          format: "Boot key pressed"
+          level: INFO
+      - button.press: boot_button
 
 light:
   # Status LED shares the red led between status and an addressable light
@@ -182,75 +235,6 @@ text_sensor:
     id: my_uptime
     update_interval: 1 min
     internal: True
-
-binary_sensor:
-  # status for HA
-  - platform: status
-    name: Status
-    
-  # sensor to alternate between inside/outside display
-  - platform: template
-    id: inside_outside
-    internal: True
-
-  # sensor to activate toggling display
-  - platform: template
-    id: toggling_display
-    internal: True
-
-  # key 1: Inside
-  - platform: gpio
-    pin:
-      number: GPIO8
-      mode:
-        input: true
-        pullup: true
-      inverted: true
-    id: key1
-    internal: True
-    filters:
-      - delayed_on_off: 50ms
-    on_state:
-      - logger.log:
-          format: "Key1 pressed"
-          level: INFO
-      - button.press: inside_button
-
-  # key 2: Outside
-  - platform: gpio
-    pin:
-      number: GPIO10
-      mode:
-        input: true
-        pullup: true
-      inverted: true
-    id: key2
-    internal: True
-    filters:
-      - delayed_on_off: 50ms
-    on_state:
-      - logger.log:
-          format: "Key2 pressed"
-          level: INFO
-      - button.press: outside_button
-
-  # key 3 (Boot): turn off display
-  - platform: gpio
-    pin:
-      number: GPIO9
-      mode:
-        input: true
-        pullup: true
-      inverted: true
-    id: key3
-    internal: True
-    filters:
-      - delayed_on_off: 50ms
-    on_state:
-      - logger.log:
-          format: "Boot key pressed"
-          level: INFO
-      - button.press: boot_button
 
 sensor:
   - platform: wifi_signal
@@ -285,41 +269,6 @@ sensor:
     on_value:
       then:
         - button.press: inside_button
-
-spi:
-  id: myspi0
-  interface: SPI
-  clk_pin: GPIO03
-  mosi_pin: GPIO04
-  # miso_pin: GPIOXX
-
-color:
-  - id: my_red
-    hex: 'FF0000'
-  - id: my_green
-    red: 10%
-    green: 100%
-    blue: 0%
-  - id: my_light_green
-    red: 50%
-    green: 100%
-    blue: 50%
-  - id: my_blue
-    hex: '0000FF'
-  - id: my_light_blue
-    red: 68%
-    green: 85%
-    blue: 90%
-  - id: my_yellow
-    red: 100%
-    green: 90%
-    blue: 0%
-  - id: my_white
-    hex: 'FFFFFF'
-  - id: my_grey
-    hex: '5A5A5A'
-  - id: my_black
-    hex: '000000'
 
 font:
   # some fonts for the display
@@ -361,6 +310,54 @@ font:
         "󰬙", # alpha-R-box
         "󰬉", # alpah-B-box
      ]
+
+color:
+  - id: my_red
+    hex: 'FF0000'
+  - id: my_green
+    red: 10%
+    green: 100%
+    blue: 0%
+  - id: my_light_green
+    red: 50%
+    green: 100%
+    blue: 50%
+  - id: my_blue
+    hex: '0000FF'
+  - id: my_light_blue
+    red: 68%
+    green: 85%
+    blue: 90%
+  - id: my_yellow
+    red: 100%
+    green: 90%
+    blue: 0%
+  - id: my_white
+    hex: 'FFFFFF'
+  - id: my_grey
+    hex: '5A5A5A'
+  - id: my_black
+    hex: '000000'
+
+spi:
+  id: myspi0
+  interface: SPI
+  clk_pin: GPIO03
+  mosi_pin: GPIO04
+  # miso_pin: GPIOXX
+
+display:
+  - platform: ili9xxx
+    id: display_1
+    model: ST7735
+    dc_pin: GPIO0
+    cs_pin: GPIO02
+    reset_pin: GPIO05
+    invert_colors: false
+    color_order: bgr
+    show_test_card: false
+    auto_clear_enabled: false
+    dimensions: 128x128
 
 lvgl:
   displays:
@@ -460,39 +457,22 @@ lvgl:
             align: CENTER
             text: 'Goodnight!'
             
-display:
-  - platform: ili9xxx
-    id: display_1
-    model: ST7735
-    dc_pin: GPIO0
-    cs_pin: GPIO02
-    reset_pin: GPIO05
-    invert_colors: false
-    color_order: bgr
-    show_test_card: false
-    auto_clear_enabled: false
-    dimensions: 128x128
-
 interval:
   - interval: 10sec
     then:
       - if:
           condition:
-            binary_sensor.is_on: toggling_display
+            binary_sensor.is_on: inside_outside
           then:
-            - if:
-                condition:
-                  binary_sensor.is_on: inside_outside
-                then:
-                  - button.press: outside_button
-                  - binary_sensor.template.publish:
-                      id: inside_outside
-                      state: False
-                else:
-                  - button.press: inside_button
-                  - binary_sensor.template.publish:
-                      id: inside_outside
-                      state: True
+            - button.press: outside_button
+            - binary_sensor.template.publish:
+                id: inside_outside
+                state: False
+          else:
+            - button.press: inside_button
+            - binary_sensor.template.publish:
+                id: inside_outside
+                state: True
 
 time:
   - platform: homeassistant
@@ -503,8 +483,7 @@ time:
         minutes: 0
         hours: 7
         then:
-          - button.press: inside_button
-          - button.press: toggling_button
+          - switch.turn_on: display_onoff
 
 
       # Every evening
@@ -512,4 +491,5 @@ time:
         minutes: 30
         hours: 21
         then:
-          - button.press: boot_button
+          - switch.turn_off: display_onoff
+
